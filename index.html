@@ -1,0 +1,1547 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EndMeow</title>
+    <!-- Загрузка Three.js и PointerLockControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+    <!-- Загрузка Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: 'Inter', sans-serif; 
+        }
+        canvas { display: block; }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 16px;
+            height: 16px;
+            margin-top: -8px;
+            margin-left: -8px;
+            border: 2px solid white;
+            border-radius: 50%;
+            pointer-events: none;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+        .block-item {
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+            position: relative; 
+        }
+        .block-item:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        .selected-block {
+            border: 4px solid #facc15; /* Yellow border for selection */
+            transform: scale(1.1);
+        }
+        #fullInventory {
+            display: none;
+            cursor: default;
+        }
+        .inventory-slot {
+            width: 64px;
+            height: 64px;
+            border: 3px solid #4b5563; /* Gray-700 */
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: border-color 0.15s;
+            overflow: hidden; 
+        }
+        .inventory-slot span {
+            position: absolute;
+            font-size: 0.75rem; /* text-xs */
+            padding: 2px 4px;
+            background-color: rgba(0, 0, 0, 0.4);
+            border-radius: 3px;
+        }
+        .inventory-slot:hover {
+            border-color: #facc15; /* Yellow */
+        }
+        #messageBox {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #ef4444; /* Red-500 */
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            pointer-events: none;
+        }
+        /* Стиль для кнопки сохранения */
+        #saveButton {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            z-index: 30;
+            transition: background-color 0.2s;
+        }
+        #saveButton:hover {
+            background-color: #2563eb;
+        }
+        #saveButton:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+        /* Стили для загрузки файла */
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        .explosion-particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #FFD700;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+    <div id="crosshair"></div>
+    <div id="messageBox" role="alert"></div>
+    
+    <!-- Кнопка сохранения мира -->
+    <button id="saveButton" title="Сохранить мир (F5)">💾 Сохранить мир</button>
+    
+    <!-- Стартовый оверлей -->
+    <div id="overlay" class="fixed inset-0 bg-gray-900 bg-opacity-70 flex flex-col items-center justify-center text-white z-50">
+        <div class="p-8 rounded-lg shadow-2xl bg-gray-800 max-w-lg text-center">
+            <h1 class="text-3xl font-bold mb-4">Добро пожаловать в EndMeow!</h1>
+            <p class="mb-6">Нажмите кнопку ниже, чтобы начать и управлять камерой.</p>
+            <div class="text-left bg-gray-700 p-4 rounded-md">
+                <p class="font-semibold mb-2 text-yellow-300">Управление:</p>
+                <ul class="list-disc list-inside space-y-1 text-sm">
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">WASD</span> — Движение (Вперед, Назад, Влево, Вправо)</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">Space</span> — Прыжок</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">Shift</span> — **Присесть (удерживать)**</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">Левая Кнопка Мыши</span> — Ломать блок</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">Правая Кнопка Мыши</span> — Ставить блок / Взаимодействовать</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">1-9</span> / <span class="font-mono bg-gray-600 px-1 rounded">Колесо Мыши</span> — Сменить слот</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">E</span> — Открыть/Закрыть Инвентарь</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">F5</span> — Сохранить мир</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">F</span> — Активировать динамит (взрыв через 3 сек)</li>
+                    <li><span class="font-mono bg-gray-600 px-1 rounded">ESC</span> — Выйти из режима управления</li>
+                </ul>
+            </div>
+            
+            <div class="mt-6 flex flex-col space-y-4">
+                <button id="startButton" class="px-6 py-3 bg-green-500 hover:bg-green-600 text-white font-bold rounded-full transition duration-150 shadow-lg">
+                    Начать Новую Игру
+                </button>
+                
+                <div class="file-input-wrapper">
+                    <button class="w-full px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full transition duration-150 shadow-lg">
+                        📁 Загрузить Мир
+                    </button>
+                    <input type="file" id="loadWorldInput" accept=".json" />
+                </div>
+            </div>
+            
+            <p class="mt-4 text-sm text-gray-400">Или перетащите файл мира сюда</p>
+        </div>
+    </div>
+
+    <!-- Инвентарь внизу экрана (Быстрая панель) -->
+    <div id="inventory" class="fixed bottom-4 left-1/2 -translate-x-1/2 flex space-x-2 z-20">
+        <!-- Блоки будут вставлены сюда с помощью JavaScript -->
+    </div>
+
+    <!-- Отображение имени выбранного блока -->
+    <div id="blockNameDisplay" class="fixed bottom-24 left-1/2 -translate-x-1/2 text-white bg-gray-800 bg-opacity-70 px-4 py-2 rounded-lg font-bold text-lg pointer-events-none z-20">
+        Трава
+    </div>
+
+    <!-- Полный Инвентарь (Скрыт по умолчанию) -->
+    <div id="fullInventory" class="fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center text-white z-50">
+        <div class="p-8 rounded-lg shadow-2xl bg-gray-800 w-full max-w-4xl max-h-[80vh] overflow-y-auto">
+            <h2 class="text-2xl font-bold mb-6 text-yellow-300">Инвентарь (Нажмите 'E' или ESC для закрытия)</h2>
+            <div id="inventoryGrid" class="grid grid-cols-10 gap-4">
+                <!-- Все доступные блоки для "взятия" будут здесь -->
+            </div>
+            <p class="mt-6 text-sm text-gray-400">Кликните, чтобы выбрать блок и поместить его в текущий слот быстрой панели.</p>
+        </div>
+    </div>
+
+    <script>
+        // --- Константы Игрока и Скорости ---
+        const BLOCK_SIZE = 1; // Размер одного блока в Three.js
+        const PLAYER_HEIGHT = 2.0; // Высота игрока 2 блока
+        const EYE_HEIGHT = 1.8;    // Высота глаз от пола
+        const PLAYER_HALF_WIDTH = 0.3; // Радиус коллизии игрока
+        const COLLISION_CHECK_OFFSET = PLAYER_HALF_WIDTH * 0.7; // Смещение для проверки коллизий
+        
+        const CROUCH_HEIGHT = 1.4; // Высота при приседании
+        const CROUCH_EYE_HEIGHT = 1.2; // Высота глаз при приседании
+        const MAX_SPEED = 10.0; // Базовая скорость
+        const CROUCH_SPEED_FACTOR = 0.4; // Множитель скорости при приседании
+        const GRAVITY_CONSTANT = 9.8 * 5.0; // Константа гравитации
+        
+        // --- Глобальные переменные ---
+        let camera, scene, renderer, controls;
+        let raycaster;
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let canJump = false;
+        let prevTime = performance.now();
+        
+        // --- Переменные состояния игрока ---
+        const velocity = new THREE.Vector3(); // Скорость игрока (горизонтальная и вертикальная)
+        let intersectedBlock = null; // Блок, на который смотрит игрок
+        let highlightMesh; // Сетка для выделения блока
+        
+        let isInventoryOpen = false;
+        let isCrouching = false;
+        let currentHeight = PLAYER_HEIGHT; // Текущая высота игрока
+        let currentEyeHeight = EYE_HEIGHT; // Текущая высота глаз
+        
+        // Вспомогательные векторы для расчета движения
+        const forwardVector = new THREE.Vector3();
+        const rightVector = new THREE.Vector3();
+        
+        // --- Конфигурация Блоков ---
+        const QUICKBAR_SIZE = 9;
+        const BLOCK_TYPES = {
+            1: { name: 'Трава', color: 0x38761d, functional: false, defaultColor: 0x38761d, isClimbable: false }, 
+            2: { name: 'Земля', color: 0x654321, functional: false, defaultColor: 0x654321, isClimbable: false },  
+            3: { name: 'Камень', color: 0x808080, functional: false, defaultColor: 0x808080, isClimbable: false }, 
+            4: { name: 'Дерево', color: 0x8B4513, functional: false, defaultColor: 0x8B4513, isClimbable: false }, 
+            5: { name: 'Песок', color: 0xFAD985, functional: false, defaultColor: 0xFAD985, isClimbable: false },
+            6: { name: 'Люк (Toggle)', color: 0x8B4513, functional: true, defaultColor: 0x8B4513, isClimbable: false }, 
+            7: { name: 'Кирпич', color: 0xB22222, functional: false, defaultColor: 0xB22222, isClimbable: false }, 
+            8: { name: 'Стекло', color: 0xADD8E6, functional: false, defaultColor: 0xADD8E6, isClimbable: false, isTransparent: true }, 
+            9: { name: 'Лестница', color: 0x774936, functional: false, defaultColor: 0x774936, isClimbable: true }, 
+            10: { name: 'Листва', color: 0x00A000, functional: false, defaultColor: 0x00A000, isClimbable: false, isTransparent: true }, 
+            11: { name: 'Сундук (Open E)', color: 0x964b00, functional: true, defaultColor: 0x964b00, isClimbable: false }, 
+            12: { name: 'Алмазный Блок', color: 0x00FFFF, functional: false, defaultColor: 0x00FFFF, isClimbable: false }, 
+            13: { name: 'Золотой Блок', color: 0xFFD700, functional: false, defaultColor: 0xFFD700, isClimbable: false }, 
+            14: { name: 'Обсидиан', color: 0x2C2255, functional: false, defaultColor: 0x2C2255, isClimbable: false }, 
+            15: { name: 'Снег', color: 0xFFFFFF, functional: false, defaultColor: 0xFFFFFF, isClimbable: false }, 
+            16: { name: 'Лёд', color: 0x99FFFF, functional: false, defaultColor: 0x99FFFF, isClimbable: false, isTransparent: true }, 
+            17: { name: 'Кварц', color: 0xE8E8E8, functional: false, defaultColor: 0xE8E8E8, isClimbable: false }, 
+            18: { name: 'Незеррак', color: 0x4C2A4C, functional: false, defaultColor: 0x4C2A4C, isClimbable: false }, 
+            19: { name: 'Плиты', color: 0xA0A0A0, functional: false, defaultColor: 0xA0A0A0, isClimbable: false }, 
+            20: { name: 'Дверь (2 блока)', color: 0x8B4513, functional: true, defaultColor: 0x8B4513, isClimbable: false, isDoor: true }, 
+            21: { name: 'Изумруд', color: 0x00FF00, functional: false, defaultColor: 0x00FF00, isClimbable: false }, 
+            22: { name: 'Лазурит', color: 0x0000FF, functional: false, defaultColor: 0x0000FF, isClimbable: false }, 
+            23: { name: 'Редстоун', color: 0xFF0000, functional: false, defaultColor: 0xFF0000, isClimbable: false }, 
+            24: { name: 'Железо', color: 0xD8D8D8, functional: false, defaultColor: 0xD8D8D8, isClimbable: false }, 
+            25: { name: 'Уголь', color: 0x333333, functional: false, defaultColor: 0x333333, isClimbable: false }, 
+            26: { name: 'Книжная полка', color: 0x8B4513, functional: false, defaultColor: 0x8B4513, isClimbable: false }, 
+            27: { name: 'Тыква', color: 0xFFA500, functional: false, defaultColor: 0xFFA500, isClimbable: false }, 
+            28: { name: 'Арбуз', color: 0x90EE90, functional: false, defaultColor: 0x90EE90, isClimbable: false }, 
+            29: { name: 'Мифрил', color: 0x87CEEB, functional: false, defaultColor: 0x87CEEB, isClimbable: false }, 
+            30: { name: 'Портал', color: 0x800080, functional: true, defaultColor: 0x800080, isClimbable: false }, 
+            31: { name: 'Кактус', color: 0x00AA00, functional: false, defaultColor: 0x00AA00, isClimbable: false }, 
+            32: { name: 'Динамит', color: 0xFF4444, functional: true, defaultColor: 0xFF4444, isClimbable: false, isTNT: true }, 
+        };
+        
+        let quickbarBlocks = [1, 2, 3, 4, 5, 6, 7, 8, 9]; // Блоки в быстрой панели
+        let selectedQuickbarSlot = 0; 
+        let selectedBlockId = quickbarBlocks[selectedQuickbarSlot]; 
+
+        // Переменные для динамита
+        let activeTNTs = new Map(); // Map для активного динамита: id -> {mesh, timer, position}
+
+        // --- Three.js Инициализация ---
+        function init() {
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            // Установка начальной позиции камеры
+            const groundSurfaceY = BLOCK_SIZE + BLOCK_SIZE / 2; 
+            camera.position.y = groundSurfaceY + EYE_HEIGHT; 
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Небо
+            scene.fog = new THREE.Fog(0x87CEEB, 0, 200);
+
+            // Создаем контролы с правильной ориентацией камеры
+            controls = new THREE.PointerLockControls(camera, document.body);
+            
+            // Убедимся, что камера не наклонена
+            camera.rotation.order = 'YXZ'; // Правильный порядок вращения для FPS камеры
+
+            const startButton = document.getElementById('startButton');
+            const loadWorldInput = document.getElementById('loadWorldInput');
+            const overlay = document.getElementById('overlay');
+            
+            startButton.addEventListener('click', () => {
+                controls.lock();
+            }, false);
+
+            // Обработчик загрузки мира
+            loadWorldInput.addEventListener('change', handleWorldFileLoad);
+
+            // Drag and drop для загрузки мира
+            document.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                overlay.classList.add('border-2', 'border-blue-500', 'border-dashed');
+            });
+
+            document.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                if (!e.relatedTarget || !overlay.contains(e.relatedTarget)) {
+                    overlay.classList.remove('border-2', 'border-blue-500', 'border-dashed');
+                }
+            });
+
+            document.addEventListener('drop', (e) => {
+                e.preventDefault();
+                overlay.classList.remove('border-2', 'border-blue-500', 'border-dashed');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0 && files[0].type === 'application/json') {
+                    loadWorldFromFile(files[0]);
+                } else {
+                    showMessage("Пожалуйста, выберите файл мира в формате JSON");
+                }
+            });
+
+            controls.addEventListener('lock', function () {
+                overlay.style.display = 'none';
+                if (isInventoryOpen) toggleInventory(false);
+            });
+            controls.addEventListener('unlock', function () {
+                overlay.style.display = 'flex';
+                // При разблокировке курсора, останавливаем движение и приседание
+                moveForward = moveBackward = moveLeft = moveRight = false;
+                velocity.set(0, 0, 0);
+                if (isCrouching) toggleCrouch(false); 
+            });
+            scene.add(controls.getObject());
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1), 0, 5); // Луч для взаимодействия с блоками
+
+            // Освещение
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(1, 1.5, 1).normalize();
+            scene.add(directionalLight);
+            
+            // Сетка для выделения блока
+            const highlightGeometry = new THREE.BoxGeometry(BLOCK_SIZE * 1.002, BLOCK_SIZE * 1.002, BLOCK_SIZE * 1.002);
+            const highlightMaterial = new THREE.MeshBasicMaterial({
+                color: 0xeeeeee,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.5
+            });
+            highlightMesh = new THREE.Mesh(highlightGeometry, highlightMaterial);
+            highlightMesh.visible = false;
+            scene.add(highlightMesh);
+
+            generateWorld();
+
+            setupInventory();
+            updateInventorySelection();
+            updateBlockNameDisplay(); 
+
+            // Обработчики событий
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', onKeyDown, false);
+            document.addEventListener('keyup', onKeyUp, false);
+            document.addEventListener('mousedown', onMouseDown, false);
+            document.addEventListener('wheel', onMouseWheel, false);
+            
+            // Обработчик для кнопки сохранения
+            document.getElementById('saveButton').addEventListener('click', saveWorldToFile);
+        }
+
+        // --- Функция сохранения мира в файл ---
+        function saveWorldToFile() {
+            try {
+                // Создаем объект для хранения данных мира
+                const worldData = {
+                    blocks: [],
+                    player: {
+                        position: {
+                            x: camera.position.x,
+                            y: camera.position.y,
+                            z: camera.position.z
+                        },
+                        quickbarBlocks: [...quickbarBlocks],
+                        selectedQuickbarSlot: selectedQuickbarSlot
+                    },
+                    metadata: {
+                        version: "1.0",
+                        saveDate: new Date().toISOString(),
+                        blockCount: worldBlocks.size
+                    }
+                };
+
+                // Собираем данные о всех блоках
+                worldBlocks.forEach((block, coords) => {
+                    worldData.blocks.push({
+                        x: block.position.x,
+                        y: block.position.y,
+                        z: block.position.z,
+                        typeId: block.userData.typeId,
+                        isOpen: block.userData.isOpen || false,
+                        isDoor: block.userData.isDoor || false,
+                        doorPart: block.userData.doorPart || null,
+                        doorId: block.userData.doorId || null
+                    });
+                });
+
+                // Преобразуем в JSON
+                const worldJson = JSON.stringify(worldData, null, 2);
+                
+                // Создаем Blob и ссылку для скачивания
+                const blob = new Blob([worldJson], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                // Создаем временную ссылку для скачивания
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `endmeow_world_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                // Освобождаем память
+                URL.revokeObjectURL(url);
+                
+                showMessage(`Мир сохранен! Блоков: ${worldBlocks.size}`);
+                console.log('Мир сохранен:', worldData);
+                
+            } catch (error) {
+                console.error('Ошибка при сохранении мира:', error);
+                showMessage('Ошибка при сохранении мира!');
+            }
+        }
+
+        // --- Функции загрузки мира ---
+        function handleWorldFileLoad(event) {
+            const file = event.target.files[0];
+            if (file) {
+                loadWorldFromFile(file);
+            }
+            // Сбрасываем значение input, чтобы можно было загрузить тот же файл снова
+            event.target.value = '';
+        }
+
+        function loadWorldFromFile(file) {
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const worldData = JSON.parse(e.target.result);
+                    loadWorldData(worldData);
+                    showMessage(`Мир загружен! Блоков: ${worldData.blocks.length}`);
+                    
+                    // Автоматически начинаем игру после загрузки
+                    controls.lock();
+                } catch (error) {
+                    console.error('Ошибка при загрузке мира:', error);
+                    showMessage('Ошибка при загрузке мира! Неверный формат файла.');
+                }
+            };
+            
+            reader.onerror = function() {
+                showMessage('Ошибка чтения файла!');
+            };
+            
+            reader.readAsText(file);
+        }
+
+        function loadWorldData(worldData) {
+            // Очищаем текущий мир
+            clearWorld();
+            
+            // Загружаем блоки
+            worldData.blocks.forEach(blockData => {
+                addBlock(blockData.x, blockData.y, blockData.z, blockData.typeId);
+                
+                // Восстанавливаем состояние функциональных блоков
+                const block = getBlockAtCoords(blockData.x, blockData.y, blockData.z);
+                if (block) {
+                    if (blockData.isOpen !== undefined) {
+                        block.userData.isOpen = blockData.isOpen;
+                        if (block.userData.typeId === 6) { // Люк
+                            block.material.color.set(blockData.isOpen ? 0x4a2c16 : BLOCK_TYPES[6].defaultColor);
+                        }
+                    }
+                    
+                    // Восстанавливаем состояние дверей
+                    if (blockData.isDoor) {
+                        block.userData.isDoor = true;
+                        block.userData.doorPart = blockData.doorPart;
+                        block.userData.doorId = blockData.doorId;
+                        block.userData.isOpen = blockData.isOpen || false;
+                        
+                        if (blockData.isOpen) {
+                            block.material.color.set(0x5a3c26); // Цвет открытой двери
+                        }
+                    }
+                }
+            });
+            
+            // Восстанавливаем состояние игрока
+            if (worldData.player) {
+                const playerPos = worldData.player.position;
+                camera.position.set(playerPos.x, playerPos.y, playerPos.z);
+                
+                if (worldData.player.quickbarBlocks) {
+                    quickbarBlocks = [...worldData.player.quickbarBlocks];
+                    selectedQuickbarSlot = worldData.player.selectedQuickbarSlot || 0;
+                    selectedBlockId = quickbarBlocks[selectedQuickbarSlot];
+                    
+                    // Обновляем UI
+                    setupInventory();
+                    updateInventorySelection();
+                    updateBlockNameDisplay();
+                }
+            }
+            
+            console.log('Мир загружен:', worldData);
+        }
+
+        function clearWorld() {
+            // Удаляем все блоки из сцены
+            worldBlocks.forEach((block) => {
+                scene.remove(block);
+            });
+            worldBlocks.clear();
+        }
+
+        // --- Всплывающее Сообщение ---
+        function showMessage(text) {
+            const messageBox = document.getElementById('messageBox');
+            messageBox.textContent = text;
+            messageBox.style.opacity = 1;
+
+            clearTimeout(window.messageTimeout);
+            window.messageTimeout = setTimeout(() => {
+                messageBox.style.opacity = 0;
+            }, 3000);
+        }
+
+        // --- Логика Мира и Блоков ---
+        const worldBlocks = new Map();
+        const blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        let doorCounter = 0; // Счетчик для уникальных ID дверей
+        let tntCounter = 0; // Счетчик для уникальных ID динамита
+        
+        function getBlockAtCoords(x, y, z) {
+            // Преобразование мировых координат в целочисленные координаты блока
+            const blockX = Math.round(x / BLOCK_SIZE);
+            const blockY = Math.round(y / BLOCK_SIZE);
+            const blockZ = Math.round(z / BLOCK_SIZE);
+            return worldBlocks.get(`${blockX},${blockY},${blockZ}`);
+        }
+
+        function isBlockSolid(x, y, z) {
+            const block = getBlockAtCoords(x, y, z);
+            if (!block) return false;
+            
+            const typeInfo = BLOCK_TYPES[block.userData.typeId];
+
+            if (typeInfo.isClimbable) return false; // Лестница не является твердой для вертикальной коллизии
+            if (block.userData.typeId === 6 && block.userData.isOpen) return false; // Открытый люк не является твердым
+            if (block.userData.isDoor && block.userData.isOpen) return false; // Открытая дверь не является твердой
+            
+            return true;
+        }
+
+        function addBlock(x, y, z, typeId) {
+            const blockInfo = BLOCK_TYPES[typeId];
+            if (!blockInfo) return;
+
+            const coords = `${x / BLOCK_SIZE},${y / BLOCK_SIZE},${z / BLOCK_SIZE}`;
+            if (worldBlocks.has(coords)) return;
+
+            let material;
+            if (blockInfo.isTransparent) {
+                // Создание прозрачного материала (например, для стекла или листвы)
+                material = new THREE.MeshLambertMaterial({ 
+                    color: blockInfo.defaultColor, 
+                    transparent: true, 
+                    opacity: 0.7 
+                });
+            } else {
+                material = new THREE.MeshLambertMaterial({ color: blockInfo.defaultColor });
+            }
+            
+            const mesh = new THREE.Mesh(blockGeometry, material);
+            mesh.position.set(x, y, z);
+            
+            // Сохранение метаданных блока
+            mesh.userData.coords = coords;
+            mesh.userData.typeId = typeId;
+            mesh.userData.isFunctional = blockInfo.functional || blockInfo.isClimbable;
+            
+            if (blockInfo.functional && blockInfo.name.includes('Люк')) {
+                mesh.userData.isOpen = false; 
+            }
+            
+            // Обработка дверей
+            if (blockInfo.isDoor) {
+                mesh.userData.isDoor = true;
+                mesh.userData.doorPart = 'bottom'; // Нижняя часть двери
+                mesh.userData.doorId = doorCounter;
+                
+                // Создаем верхнюю часть двери
+                const topMesh = new THREE.Mesh(blockGeometry, material);
+                topMesh.position.set(x, y + BLOCK_SIZE, z);
+                const topCoords = `${x / BLOCK_SIZE},${(y + BLOCK_SIZE) / BLOCK_SIZE},${z / BLOCK_SIZE}`;
+                
+                topMesh.userData.coords = topCoords;
+                topMesh.userData.typeId = typeId;
+                topMesh.userData.isFunctional = true;
+                topMesh.userData.isDoor = true;
+                topMesh.userData.doorPart = 'top';
+                topMesh.userData.doorId = doorCounter;
+                topMesh.userData.isOpen = false;
+                
+                scene.add(topMesh);
+                worldBlocks.set(topCoords, topMesh);
+                
+                doorCounter++;
+            }
+            
+            // Обработка динамита
+            if (blockInfo.isTNT) {
+                mesh.userData.isTNT = true;
+                mesh.userData.tntId = tntCounter++;
+                mesh.userData.isActive = false;
+            }
+
+            scene.add(mesh);
+            worldBlocks.set(mesh.userData.coords, mesh);
+            return mesh;
+        }
+
+        function generateTree(startX, startY, startZ) {
+            const trunkHeight = Math.floor(Math.random() * 3) + 3; 
+
+            // 1. Ствол (Дерево - ID 4)
+            for (let h = 0; h < trunkHeight; h++) {
+                addBlock(startX, startY + h * BLOCK_SIZE, startZ, 4);
+            }
+
+            // 2. Листва (ID 10) - Крона
+            const leavesCenterY = startY + (trunkHeight) * BLOCK_SIZE;
+            const leavesRadius = 1.5; // Радиус кроны
+
+            for (let x = startX - BLOCK_SIZE; x <= startX + BLOCK_SIZE; x += BLOCK_SIZE) {
+                for (let y = leavesCenterY; y <= leavesCenterY + BLOCK_SIZE * 2; y += BLOCK_SIZE) {
+                    for (let z = startZ - BLOCK_SIZE; z <= startZ + BLOCK_SIZE; z += BLOCK_SIZE) {
+                        
+                        const dx = (x - startX) / BLOCK_SIZE;
+                        const dy = (y - leavesCenterY) / BLOCK_SIZE;
+                        const dz = (z - startZ) / BLOCK_SIZE;
+                        
+                        // Простая проверка формы (эллипсоид)
+                        if ((dx * dx + dy * dy / 4 + dz * dz) < leavesRadius) {
+                            const block = getBlockAtCoords(x, y, z);
+                            // Ставим листву, только если там не ствол
+                            if (!block || block.userData.typeId !== 4) { 
+                                addBlock(x, y, z, 10);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function generateCactus(startX, startY, startZ) {
+            const height = Math.floor(Math.random() * 3) + 2; // Высота кактуса 2-4 блока
+            for (let h = 0; h < height; h++) {
+                addBlock(startX, startY + h * BLOCK_SIZE, startZ, 31);
+            }
+        }
+
+        function generateWorld() {
+            const worldSize = 30;
+            
+            // Генерация ландшафта с песчаными долинами
+            for (let x = -worldSize; x <= worldSize; x++) {
+                for (let z = -worldSize; z <= worldSize; z++) {
+                    const blockX = x * BLOCK_SIZE;
+                    const blockZ = z * BLOCK_SIZE;
+                    
+                    // Определяем тип биома
+                    const isDesert = Math.abs(x) > 10 || Math.abs(z) > 10; // Песчаные долины по краям
+                    
+                    if (isDesert) {
+                        // Песчаная долина
+                        addBlock(blockX, 0 * BLOCK_SIZE, blockZ, 5); // Песок внизу
+                        addBlock(blockX, 1 * BLOCK_SIZE, blockZ, 5); // Песок на поверхности
+                        
+                        // Кактусы в пустыне
+                        if (Math.random() < 0.05) {
+                            generateCactus(blockX, 2 * BLOCK_SIZE, blockZ);
+                        }
+                    } else {
+                        // Обычная зеленая зона
+                        addBlock(blockX, 0 * BLOCK_SIZE, blockZ, 2); // Земля
+                        addBlock(blockX, 1 * BLOCK_SIZE, blockZ, 1); // Трава
+                        
+                        // Деревья только в зеленой зоне
+                        if (Math.random() < 0.03) {
+                            generateTree(blockX, 1 * BLOCK_SIZE, blockZ);
+                        }
+                    }
+                }
+            }
+            
+            // Дополнительные функциональные/декоративные блоки
+            addBlock(5 * BLOCK_SIZE, 2 * BLOCK_SIZE, 0 * BLOCK_SIZE, 11); // Сундук
+            addBlock(6 * BLOCK_SIZE, 2 * BLOCK_SIZE, 0 * BLOCK_SIZE, 12); // Алмазный Блок
+            addBlock(7 * BLOCK_SIZE, 2 * BLOCK_SIZE, 0 * BLOCK_SIZE, 13); // Золотой Блок
+            addBlock(8 * BLOCK_SIZE, 2 * BLOCK_SIZE, 0 * BLOCK_SIZE, 9); // Лестница
+            addBlock(8 * BLOCK_SIZE, 3 * BLOCK_SIZE, 0 * BLOCK_SIZE, 9); // Лестница
+            
+            // Создаем дом с дверью
+            const houseX = 10 * BLOCK_SIZE;
+            const houseZ = 5 * BLOCK_SIZE;
+            
+            // Стены дома
+            for (let y = 1; y <= 3; y++) {
+                for (let x = -2; x <= 2; x++) {
+                    addBlock(houseX + x * BLOCK_SIZE, y * BLOCK_SIZE, houseZ - 2 * BLOCK_SIZE, 7); // Задняя стена
+                    addBlock(houseX + x * BLOCK_SIZE, y * BLOCK_SIZE, houseZ + 2 * BLOCK_SIZE, 7); // Передняя стена
+                }
+                for (let z = -1; z <= 1; z++) {
+                    addBlock(houseX - 2 * BLOCK_SIZE, y * BLOCK_SIZE, houseZ + z * BLOCK_SIZE, 7); // Левая стена
+                    addBlock(houseX + 2 * BLOCK_SIZE, y * BLOCK_SIZE, houseZ + z * BLOCK_SIZE, 7); // Правая стена
+                }
+            }
+            
+            // Крыша
+            for (let x = -2; x <= 2; x++) {
+                for (let z = -2; z <= 2; z++) {
+                    addBlock(houseX + x * BLOCK_SIZE, 4 * BLOCK_SIZE, houseZ + z * BLOCK_SIZE, 4); // Деревянная крыша
+                }
+            }
+            
+            // Дверь
+            addBlock(houseX, 1 * BLOCK_SIZE, houseZ + 2 * BLOCK_SIZE, 20); // Дверь
+            
+            // Окна
+            addBlock(houseX - 2 * BLOCK_SIZE, 2 * BLOCK_SIZE, houseZ, 8); // Стеклянное окно
+            addBlock(houseX + 2 * BLOCK_SIZE, 2 * BLOCK_SIZE, houseZ, 8); // Стеклянное окно
+            
+            // Внутреннее убранство
+            addBlock(houseX - 1 * BLOCK_SIZE, 1 * BLOCK_SIZE, houseZ - 1 * BLOCK_SIZE, 11); // Сундук внутри
+            addBlock(houseX + 1 * BLOCK_SIZE, 1 * BLOCK_SIZE, houseZ, 14); // Обсидиан внутри
+            
+            // Шахта с рудами
+            for (let i = 0; i < 10; i++) {
+                addBlock(-5 * BLOCK_SIZE, -i * BLOCK_SIZE, -5 * BLOCK_SIZE, 24); // Железо
+                addBlock(-6 * BLOCK_SIZE, -i * BLOCK_SIZE, -5 * BLOCK_SIZE, 25); // Уголь
+                addBlock(-7 * BLOCK_SIZE, -i * BLOCK_SIZE, -5 * BLOCK_SIZE, 21); // Изумруд
+            }
+            
+            // Пирамида из новых блоков в пустыне
+            const pyramidX = -15 * BLOCK_SIZE;
+            const pyramidZ = -15 * BLOCK_SIZE;
+            const pyramidBlocks = [21, 22, 23, 29]; // Изумруд, Лазурит, Редстоун, Мифрил
+            
+            for (let level = 0; level < 4; level++) {
+                const size = 4 - level;
+                for (let x = -size; x <= size; x++) {
+                    for (let z = -size; z <= size; z++) {
+                        const blockType = pyramidBlocks[level % pyramidBlocks.length];
+                        addBlock(pyramidX + x * BLOCK_SIZE, (level + 1) * BLOCK_SIZE, pyramidZ + z * BLOCK_SIZE, blockType);
+                    }
+                }
+            }
+            
+            // Добавляем немного динамита в мир для тестирования
+            addBlock(-8 * BLOCK_SIZE, 2 * BLOCK_SIZE, -8 * BLOCK_SIZE, 32);
+            addBlock(-10 * BLOCK_SIZE, 2 * BLOCK_SIZE, -10 * BLOCK_SIZE, 32);
+        }
+
+        // --- Функции для динамита ---
+        function activateTNT(mesh) {
+            if (!mesh || !mesh.userData.isTNT || mesh.userData.isActive) return;
+            
+            mesh.userData.isActive = true;
+            const tntId = mesh.userData.tntId;
+            
+            // Запускаем таймер взрыва (3 секунды)
+            const timer = setTimeout(() => {
+                explodeTNT(mesh);
+            }, 3000);
+            
+            // Сохраняем информацию об активном динамите
+            activeTNTs.set(tntId, {
+                mesh: mesh,
+                timer: timer,
+                position: mesh.position.clone()
+            });
+            
+            // Визуальная индикация активации (мигание)
+            let blinkCount = 0;
+            const maxBlinks = 6;
+            const originalColor = mesh.material.color.clone();
+            
+            const blinkInterval = setInterval(() => {
+                if (blinkCount >= maxBlinks * 2) {
+                    clearInterval(blinkInterval);
+                    return;
+                }
+                
+                if (blinkCount % 2 === 0) {
+                    mesh.material.color.set(0xFFFFFF); // Белый цвет при мигании
+                } else {
+                    mesh.material.color.copy(originalColor);
+                }
+                blinkCount++;
+            }, 250);
+            
+            showMessage("Динамит активирован! Взрыв через 3 секунды!");
+        }
+
+        function explodeTNT(mesh) {
+            if (!mesh) return;
+            
+            const explosionRadius = 4; // Радиус взрыва в блоках
+            const explosionCenter = mesh.position;
+            
+            // Создаем визуальный эффект взрыва
+            createExplosionEffect(explosionCenter);
+            
+            // Удаляем блоки в радиусе взрыва
+            const blocksToRemove = [];
+            
+            for (let x = -explosionRadius; x <= explosionRadius; x++) {
+                for (let y = -explosionRadius; y <= explosionRadius; y++) {
+                    for (let z = -explosionRadius; z <= explosionRadius; z++) {
+                        const distance = Math.sqrt(x*x + y*y + z*z);
+                        if (distance <= explosionRadius) {
+                            const blockX = explosionCenter.x + x * BLOCK_SIZE;
+                            const blockY = explosionCenter.y + y * BLOCK_SIZE;
+                            const blockZ = explosionCenter.z + z * BLOCK_SIZE;
+                            
+                            const block = getBlockAtCoords(blockX, blockY, blockZ);
+                            if (block && block.userData.typeId !== 14) { // Обсидиан не разрушается взрывом
+                                blocksToRemove.push(block);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Удаляем блоки
+            blocksToRemove.forEach(block => {
+                removeBlock(block);
+            });
+            
+            // Удаляем сам динамит
+            removeBlock(mesh);
+            
+            // Удаляем из активных TNT
+            if (mesh.userData.tntId !== undefined) {
+                activeTNTs.delete(mesh.userData.tntId);
+            }
+            
+            showMessage("БУМ! Динамит взорвался!");
+        }
+
+        function createExplosionEffect(center) {
+            // Создаем частицы взрыва
+            const particleCount = 50;
+            for (let i = 0; i < particleCount; i++) {
+                createParticle(center);
+            }
+            
+            // Временное затемнение экрана (эффект вспышки)
+            const flash = document.createElement('div');
+            flash.style.position = 'fixed';
+            flash.style.top = '0';
+            flash.style.left = '0';
+            flash.style.width = '100%';
+            flash.style.height = '100%';
+            flash.style.backgroundColor = 'white';
+            flash.style.opacity = '0.3';
+            flash.style.pointerEvents = 'none';
+            flash.style.zIndex = '15';
+            document.body.appendChild(flash);
+            
+            setTimeout(() => {
+                document.body.removeChild(flash);
+            }, 100);
+        }
+
+        function createParticle(center) {
+            const particle = document.createElement('div');
+            particle.className = 'explosion-particle';
+            
+            // Случайное направление и скорость
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 2 + Math.random() * 3;
+            const vx = Math.cos(angle) * speed;
+            const vy = -2 - Math.random() * 3; // Вверх с разной силой
+            const vz = Math.sin(angle) * speed;
+            
+            let x = 0, y = 0, z = 0;
+            const startX = center.x;
+            const startY = center.y;
+            const startZ = center.z;
+            
+            // Преобразуем 3D координаты в 2D экранные координаты (упрощенно)
+            function updatePosition() {
+                x += vx * 0.1;
+                y += vy * 0.1;
+                z += vz * 0.1;
+                vy += 0.1; // Гравитация
+                
+                // Проецируем 3D позицию на 2D экран
+                const screenX = (x + startX) * 10 + window.innerWidth / 2;
+                const screenY = window.innerHeight / 2 - (y + startY) * 10;
+                
+                particle.style.left = screenX + 'px';
+                particle.style.top = screenY + 'px';
+                
+                // Уменьшаем размер частицы со временем
+                const scale = 1 - (Math.abs(y) / 10);
+                particle.style.transform = `scale(${Math.max(0, scale)})`;
+                
+                if (y > 5 || scale <= 0) {
+                    document.body.removeChild(particle);
+                    return false;
+                }
+                return true;
+            }
+            
+            document.body.appendChild(particle);
+            
+            // Анимация частицы
+            const animateParticle = () => {
+                if (updatePosition()) {
+                    requestAnimationFrame(animateParticle);
+                }
+            };
+            
+            animateParticle();
+        }
+
+        function removeBlock(mesh) {
+            if (!mesh || mesh.userData.coords === undefined) return;
+            
+            // Обработка удаления дверей
+            if (mesh.userData.isDoor) {
+                const doorId = mesh.userData.doorId;
+                
+                // Находим и удаляем обе части двери
+                worldBlocks.forEach((block, coords) => {
+                    if (block.userData.doorId === doorId) {
+                        scene.remove(block);
+                        worldBlocks.delete(coords);
+                    }
+                });
+                
+                highlightMesh.visible = false;
+                intersectedBlock = null;
+                showMessage(`Дверь сломана!`);
+                return;
+            }
+            
+            // Обработка удаления активного динамита
+            if (mesh.userData.isTNT && mesh.userData.isActive) {
+                const tntId = mesh.userData.tntId;
+                if (activeTNTs.has(tntId)) {
+                    clearTimeout(activeTNTs.get(tntId).timer);
+                    activeTNTs.delete(tntId);
+                }
+            }
+            
+            const coords = mesh.userData.coords;
+            scene.remove(mesh);
+            worldBlocks.delete(coords);
+            highlightMesh.visible = false;
+            intersectedBlock = null;
+            showMessage(`Блок ${BLOCK_TYPES[mesh.userData.typeId].name} сломан!`);
+        }
+        
+        function toggleFunctionalBlock(mesh) {
+            if (mesh.userData.typeId === 6) { // Люк
+                mesh.userData.isOpen = !mesh.userData.isOpen;
+                
+                const blockInfo = BLOCK_TYPES[mesh.userData.typeId];
+                if (mesh.userData.isOpen) {
+                    mesh.material.color.set(0x4a2c16); // Изменение цвета для имитации открытого состояния
+                    showMessage("Люк открыт!");
+                } else {
+                    mesh.material.color.set(blockInfo.defaultColor); 
+                    showMessage("Люк закрыт!");
+                }
+            } else if (mesh.userData.typeId === 11) { // Сундук
+                toggleInventory(true);
+                showMessage("Сундук открыт! (Переход в Инвентарь)");
+            } else if (mesh.userData.isDoor) { // Дверь
+                const doorId = mesh.userData.doorId;
+                let isAnyOpen = false;
+                
+                // Находим обе части двери и переключаем их состояние
+                worldBlocks.forEach((block) => {
+                    if (block.userData.doorId === doorId) {
+                        block.userData.isOpen = !block.userData.isOpen;
+                        if (block.userData.isOpen) {
+                            block.material.color.set(0x5a3c26); // Цвет открытой двери
+                            isAnyOpen = true;
+                        } else {
+                            block.material.color.set(BLOCK_TYPES[20].defaultColor); // Цвет закрытой двери
+                        }
+                    }
+                });
+                
+                showMessage(isAnyOpen ? "Дверь открыта!" : "Дверь закрыта!");
+            } else if (mesh.userData.typeId === 30) { // Портал
+                showMessage("Портал активирован! Телепортация...");
+                // Простая телепортация на случайную позицию
+                const newX = (Math.random() * 40 - 20) * BLOCK_SIZE;
+                const newZ = (Math.random() * 40 - 20) * BLOCK_SIZE;
+                controls.getObject().position.set(newX, 5 * BLOCK_SIZE, newZ);
+            } else if (mesh.userData.isTNT) { // Динамит
+                activateTNT(mesh);
+            }
+        }
+        
+        // --- Логика Приседания (Crouching) ---
+        function canStandUp(playerX, playerY, playerZ) {
+            // Проверяем, есть ли твердый блок над головой игрока, если он встанет.
+            // Проверяем несколько точек на уровне головы
+            const standUpHeadY = playerY + (PLAYER_HEIGHT - CROUCH_HEIGHT); 
+            
+            // Проверяем несколько Y-координат для высокого игрока
+            const checkYs = [];
+            for (let i = 0; i < 3; i++) {
+                const y = standUpHeadY + (i * BLOCK_SIZE / 2);
+                checkYs.push(Math.round((y + 0.1) / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE / 2);
+            }
+
+            for (let y of checkYs) {
+                if (isBlockSolid(playerX, y, playerZ)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function toggleCrouch(crouch) {
+            if (crouch === isCrouching) return; 
+
+            if (crouch) {
+                // Начать приседание
+                isCrouching = true;
+                currentHeight = CROUCH_HEIGHT;
+                currentEyeHeight = CROUCH_EYE_HEIGHT;
+                // Сдвиг камеры вниз
+                controls.getObject().position.y -= (PLAYER_HEIGHT - CROUCH_HEIGHT);
+            } else {
+                // Попытка встать
+                const playerObject = controls.getObject();
+                
+                if (canStandUp(playerObject.position.x, playerObject.position.y, playerObject.position.z)) {
+                    // Встать
+                    isCrouching = false;
+                    currentHeight = PLAYER_HEIGHT;
+                    currentEyeHeight = EYE_HEIGHT;
+                    // Сдвиг камеры вверх
+                    controls.getObject().position.y += (PLAYER_HEIGHT - CROUCH_HEIGHT);
+                } else {
+                    // Невозможно встать, потолок слишком низкий
+                    isCrouching = true; // Остаемся в режиме приседания
+                    showMessage("Невозможно встать! Слишком низкий потолок.");
+                }
+            }
+        }
+
+        // --- Управление и Ввод ---
+
+        function toggleInventory(shouldOpen) {
+            isInventoryOpen = shouldOpen;
+            const inventoryElement = document.getElementById('fullInventory');
+            if (isInventoryOpen) {
+                inventoryElement.style.display = 'flex';
+                controls.unlock();
+                if (isCrouching) toggleCrouch(false); 
+            } else {
+                inventoryElement.style.display = 'none';
+                controls.lock();
+            }
+        }
+        
+        function onMouseWheel(event) {
+            if (isInventoryOpen) return;
+            if (!controls.isLocked) return;
+            
+            event.preventDefault();
+
+            if (event.deltaY > 0) {
+                selectedQuickbarSlot = (selectedQuickbarSlot + 1) % QUICKBAR_SIZE;
+            } else if (event.deltaY < 0) {
+                selectedQuickbarSlot = (selectedQuickbarSlot - 1 + QUICKBAR_SIZE) % QUICKBAR_SIZE;
+            }
+            
+            selectedBlockId = quickbarBlocks[selectedQuickbarSlot];
+            updateInventorySelection();
+            updateBlockNameDisplay();
+        }
+
+        function onKeyDown(event) {
+            if (isInventoryOpen) {
+                if (event.code === 'KeyE' || event.code === 'Escape') {
+                    toggleInventory(false);
+                }
+                return;
+            }
+            
+            if (!controls.isLocked) return;
+
+            // Выбор слота 1-9
+            if (event.code.startsWith('Digit') && event.key !== '0') {
+                const slotIndex = parseInt(event.key) - 1;
+                if (slotIndex >= 0 && slotIndex < QUICKBAR_SIZE) {
+                    selectedQuickbarSlot = slotIndex;
+                    selectedBlockId = quickbarBlocks[selectedQuickbarSlot];
+                    updateInventorySelection();
+                    updateBlockNameDisplay();
+                }
+            }
+            
+            switch (event.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyD': moveRight = true; break;
+                case 'Space':
+                    if (canJump === true) velocity.y += 15;
+                    canJump = false;
+                    break;
+                case 'KeyE': toggleInventory(true); break;
+                case 'KeyF': // Активация динамита
+                    if (intersectedBlock && intersectedBlock.userData.isTNT) {
+                        activateTNT(intersectedBlock);
+                    }
+                    break;
+                case 'F5': saveWorldToFile(); break; // Сохранение мира по F5
+                case 'Escape': controls.unlock(); break;
+                case 'ShiftLeft': toggleCrouch(true); break;
+            }
+        }
+
+        function onKeyUp(event) {
+            if (!controls.isLocked || isInventoryOpen) return;
+            switch (event.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyD': moveRight = false; break;
+                case 'ShiftLeft': toggleCrouch(false); break;
+            }
+        }
+
+        function onMouseDown(event) {
+            if (!controls.isLocked || isInventoryOpen) return;
+            event.preventDefault();
+
+            if (intersectedBlock) {
+                if (event.button === 0) { // Левая кнопка мыши (Ломать)
+                    removeBlock(intersectedBlock);
+                } else if (event.button === 2) { // Правая кнопка мыши (Ставить / Взаимодействовать)
+                    if (intersectedBlock.userData.isFunctional || intersectedBlock.userData.isDoor || intersectedBlock.userData.isTNT) {
+                        toggleFunctionalBlock(intersectedBlock);
+                    } else {
+                        placeBlock(intersectedBlock, selectedBlockId);
+                    }
+                }
+            }
+        }
+        
+        // Отключение контекстного меню при правой кнопке мыши
+        document.addEventListener('contextmenu', (event) => {
+            if (controls.isLocked || isInventoryOpen) event.preventDefault();
+        });
+
+        function placeBlock(targetBlock, typeId) {
+            if (!targetBlock) return;
+            
+            const selectedBlockInfo = BLOCK_TYPES[typeId];
+            if (!selectedBlockInfo) return; 
+
+            // Находим точку, куда нужно ставить блок (смещение на 1 блок от поверхности)
+            const intersection = raycaster.intersectObject(targetBlock)[0];
+            if (!intersection) return;
+
+            const faceNormal = intersection.face.normal;
+            const newPos = targetBlock.position.clone();
+
+            newPos.x += faceNormal.x * BLOCK_SIZE;
+            newPos.y += faceNormal.y * BLOCK_SIZE;
+            newPos.z += faceNormal.z * BLOCK_SIZE;
+            
+            // --- Проверка AABB на пересечение с игроком ---
+            const playerPos = controls.getObject().position;
+            const playerMinX = playerPos.x - PLAYER_HALF_WIDTH;
+            const playerMaxX = playerPos.x + PLAYER_HALF_WIDTH;
+            // Динамическая Y-проверка с учетом приседания
+            const playerMinY = playerPos.y - currentEyeHeight; 
+            const playerMaxY = playerPos.y + (currentHeight - currentEyeHeight);
+
+            const blockHalfSize = BLOCK_SIZE / 2;
+            const blockMinX = newPos.x - blockHalfSize;
+            const blockMaxX = newPos.x + blockHalfSize;
+            const blockMinY = newPos.y - blockHalfSize;
+            const blockMaxY = newPos.y + blockHalfSize;
+            const blockMinZ = newPos.z - blockHalfSize;
+            const blockMaxZ = newPos.z + blockHalfSize;
+
+            const intersectsX = blockMinX < playerMaxX && blockMaxX > playerMinX;
+            const intersectsY = blockMinY < playerMaxY && blockMaxY > playerMinY; 
+            const intersectsZ = blockMinZ < playerPos.z + PLAYER_HALF_WIDTH && blockMaxZ > playerPos.z - PLAYER_HALF_WIDTH;
+
+            if (intersectsX && intersectsY && intersectsZ) {
+                showMessage("Нельзя ставить блок внутри себя!");
+                return;
+            }
+            
+            addBlock(newPos.x, newPos.y, newPos.z, typeId);
+            showMessage(`Блок ${selectedBlockInfo.name} размещен.`);
+        }
+
+        // --- Инвентарь UI ---
+
+        function setupInventory() {
+            const inventoryDiv = document.getElementById('inventory');
+            const fullInventoryGrid = document.getElementById('inventoryGrid');
+            inventoryDiv.innerHTML = '';
+            fullInventoryGrid.innerHTML = '';
+
+            // 1. Быстрая панель (Quickbar)
+            for (let i = 0; i < QUICKBAR_SIZE; i++) {
+                const id = quickbarBlocks[i];
+                const info = BLOCK_TYPES[id];
+                const button = document.createElement('div');
+                button.className = `block-item w-16 h-16 rounded-lg flex items-center justify-center shadow-xl border-4 border-transparent p-1`;
+                button.style.backgroundColor = `#${info.defaultColor.toString(16).padStart(6, '0')}`;
+                button.dataset.slotIndex = i;
+                button.dataset.blockId = id;
+                button.title = info.name + ` (${i + 1})`;
+                
+                button.innerHTML = `
+                    <span class="absolute top-0 left-1 text-white text-sm font-bold drop-shadow-lg">${i + 1}</span>
+                `; 
+                
+                button.addEventListener('click', () => {
+                    selectedQuickbarSlot = i;
+                    selectedBlockId = id;
+                    updateInventorySelection();
+                    updateBlockNameDisplay();
+                });
+                inventoryDiv.appendChild(button);
+            }
+
+            // 2. Полный инвентарь (Grid)
+            Object.entries(BLOCK_TYPES).forEach(([id, info]) => {
+                const blockId = parseInt(id);
+                const slot = document.createElement('div');
+                slot.className = `inventory-slot bg-gray-700 hover:bg-gray-600 relative`;
+                slot.style.backgroundColor = `#${info.defaultColor.toString(16).padStart(6, '0')}`;
+                slot.title = info.name;
+                slot.innerHTML = `<span class="text-white text-sm font-semibold">${info.name}</span>`;
+                
+                slot.addEventListener('click', () => {
+                    quickbarBlocks[selectedQuickbarSlot] = blockId;
+                    selectedBlockId = blockId;
+                    setupInventory(); 
+                    updateInventorySelection();
+                    updateBlockNameDisplay();
+                    toggleInventory(false); 
+                });
+                fullInventoryGrid.appendChild(slot);
+            });
+        }
+
+        function updateInventorySelection() {
+            document.querySelectorAll('.block-item').forEach(item => {
+                item.classList.remove('selected-block');
+                if (parseInt(item.dataset.slotIndex) === selectedQuickbarSlot) {
+                    item.classList.add('selected-block');
+                }
+            });
+        }
+        
+        function updateBlockNameDisplay() {
+            const name = BLOCK_TYPES[selectedBlockId].name;
+            document.getElementById('blockNameDisplay').textContent = name;
+        }
+
+        // --- Анимационный Цикл и Рендеринг ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            const delta = (time - prevTime) / 1000;
+            
+            if (controls.isLocked && !isInventoryOpen) {
+                
+                // 1. Настройка скорости и трения
+                const speed = isCrouching ? MAX_SPEED * CROUCH_SPEED_FACTOR : MAX_SPEED;
+                const acceleration = 40.0; 
+                const dampingFactor = 10.0;
+                
+                velocity.x -= velocity.x * dampingFactor * delta; 
+                velocity.z -= velocity.z * dampingFactor * delta; 
+
+                // Ускорение
+                if (moveForward) velocity.z = Math.min(velocity.z + acceleration * delta, speed); 
+                if (moveBackward) velocity.z = Math.max(velocity.z - acceleration * delta, -speed);
+                
+                // Исправлена логика движения A/D, чтобы соответствовать Minecraft
+                if (moveLeft) velocity.x = Math.min(velocity.x + acceleration * delta, speed);
+                if (moveRight) velocity.x = Math.max(velocity.x - acceleration * delta, -speed);
+                
+                // 2. Расчет мирового движения
+                const moveZLocal = velocity.z * delta; 
+                const moveXLocal = velocity.x * delta; 
+                
+                const playerObject = controls.getObject();
+                const playerX = playerObject.position.x;
+                const playerZ = playerObject.position.z;
+                
+                // Вектор "Вперед"
+                playerObject.getWorldDirection(forwardVector); 
+                // Вектор "Вправо"
+                rightVector.set(forwardVector.z, 0, -forwardVector.x).normalize();
+                
+                // Расчет финального вектора движения в мировых координатах
+                const moveXWorld = (forwardVector.x * moveZLocal) + (rightVector.x * moveXLocal);
+                const moveZWorld = (forwardVector.z * moveZLocal) + (rightVector.z * moveXLocal);
+
+                let nextX = playerX + moveXWorld;
+                let nextZ = playerZ + moveZWorld;
+                
+                // --- Y-Уровни для проверки коллизий ---
+                // Для высокого игрока проверяем больше точек по высоте
+                const playerY = playerObject.position.y;
+                const checkPoints = [];
+                
+                // Проверяем несколько точек по высоте игрока
+                for (let i = 0; i < 3; i++) {
+                    const yOffset = (i / 2) * (currentHeight - currentEyeHeight);
+                    checkPoints.push(
+                        Math.round((playerY - currentEyeHeight + yOffset + 0.1) / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE / 2
+                    );
+                }
+                
+                // --- 2. Проверка на Лестницу (Climbing) ---
+                let onLadder = false;
+                
+                // Проверяем, находится ли игрок на лестнице (коллизия с Y-уровнями)
+                checkPoints.forEach(y => {
+                    const block = getBlockAtCoords(playerX, y, playerZ);
+                    if (block && BLOCK_TYPES[block.userData.typeId].isClimbable) {
+                        onLadder = true;
+                    }
+                });
+                
+                if (onLadder) {
+                    canJump = true; 
+                    velocity.y = 0; 
+                    const climbSpeed = 5.0; 
+
+                    if (moveForward) {
+                        velocity.y = climbSpeed;
+                    } else if (moveBackward) {
+                        velocity.y = -climbSpeed;
+                    } 
+                } else {
+                    // Нормальная гравитация
+                    velocity.y -= GRAVITY_CONSTANT * delta; 
+                }
+
+                // --- 3. Горизонтальная Коллизия (X/Z) ---
+
+                // Проверка X-коллизии
+                if (Math.abs(moveXWorld) > 0.001) {
+                    const checkZOffsets = [-COLLISION_CHECK_OFFSET, 0, COLLISION_CHECK_OFFSET];
+                    let isColliding = false;
+
+                    for (let zOffset of checkZOffsets) {
+                        const checkBlockX = nextX + (moveXWorld > 0 ? PLAYER_HALF_WIDTH : -PLAYER_HALF_WIDTH);
+                        const blockXCenter = Math.round(checkBlockX / BLOCK_SIZE) * BLOCK_SIZE;
+                        
+                        // Проверяем все точки по высоте
+                        for (let y of checkPoints) {
+                            const blockZCenter = Math.round((playerZ + zOffset) / BLOCK_SIZE) * BLOCK_SIZE;
+                            if (isBlockSolid(blockXCenter, y, blockZCenter)) {
+                                isColliding = true;
+                                break;
+                            }
+                        }
+                        if (isColliding) break;
+                    }
+                    
+                    if (isColliding) {
+                        velocity.x = 0; 
+                        nextX = playerX; 
+                    }
+                }
+
+                // Проверка Z-коллизии
+                if (Math.abs(moveZWorld) > 0.001) {
+                    const checkXOffsets = [-COLLISION_CHECK_OFFSET, 0, COLLISION_CHECK_OFFSET];
+                    let isColliding = false;
+
+                    for (let xOffset of checkXOffsets) {
+                        const checkBlockZ = nextZ + (moveZWorld > 0 ? PLAYER_HALF_WIDTH : -PLAYER_HALF_WIDTH);
+                        const blockZCenter = Math.round(checkBlockZ / BLOCK_SIZE) * BLOCK_SIZE;
+                        
+                        // Проверяем все точки по высоте
+                        for (let y of checkPoints) {
+                            const blockXCenter = Math.round((nextX + xOffset) / BLOCK_SIZE) * BLOCK_SIZE; 
+                            if (isBlockSolid(blockXCenter, y, blockZCenter)) {
+                                isColliding = true;
+                                break;
+                            }
+                        }
+                        if (isColliding) break;
+                    }
+                    
+                    if (isColliding) {
+                        velocity.z = 0; 
+                        nextZ = playerZ; 
+                    }
+                }
+                
+                // Применяем горизонтальное движение
+                playerObject.position.x = nextX;
+                playerObject.position.z = nextZ;
+
+                // --- 4. Вертикальная коллизия (Лэндинг/Потолок) ---
+                
+                let nextY = playerObject.position.y + (velocity.y * delta);
+                
+                if (velocity.y < 0) {
+                    // Лэндинг
+                    const nextFeetY = nextY - currentEyeHeight; 
+                    const floorBlockYCenter = Math.floor(nextFeetY / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE / 2;
+
+                    if (isBlockSolid(playerX, floorBlockYCenter, playerZ)) {
+                        const surfaceY = floorBlockYCenter + BLOCK_SIZE / 2;
+                        if (nextFeetY < surfaceY) {
+                            velocity.y = 0;
+                            nextY = surfaceY + currentEyeHeight; 
+                            canJump = true;
+                        }
+                    }
+                } else if (velocity.y > 0) {
+                    // Удар головой - проверяем все верхние точки
+                    let headCollision = false;
+                    let minCeilingY = Infinity;
+                    
+                    for (let i = 0; i < 3; i++) {
+                        const headYOffset = (i / 2) * (currentHeight - currentEyeHeight);
+                        const nextHeadY = nextY + headYOffset; 
+                        const ceilingBlockYCenter = Math.floor(nextHeadY / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE / 2;
+                        
+                        if (isBlockSolid(playerX, ceilingBlockYCenter, playerZ)) {
+                            headCollision = true;
+                            const ceilingSurfaceY = ceilingBlockYCenter - BLOCK_SIZE / 2;
+                            minCeilingY = Math.min(minCeilingY, ceilingSurfaceY - headYOffset);
+                        }
+                    }
+                    
+                    if (headCollision) {
+                        velocity.y = 0; 
+                        nextY = Math.min(nextY, minCeilingY);
+                    }
+                }
+                
+                // Применяем финальную Y-позицию
+                playerObject.position.y = nextY; 
+
+                // 5. Защита от падения (Fall Protection)
+                const groundSurfaceY = BLOCK_SIZE + BLOCK_SIZE / 2;
+                if (playerObject.position.y < groundSurfaceY + currentEyeHeight) {
+                    playerObject.position.y = groundSurfaceY + currentEyeHeight;
+                    velocity.y = 0;
+                    canJump = true;
+                }
+
+                // --- Логика Raycasting (Выделение блока) ---
+                raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+                
+                const intersectableObjects = Array.from(worldBlocks.values());
+                const intersects = raycaster.intersectObjects(intersectableObjects);
+
+                if (intersects.length > 0) {
+                    const firstHit = intersects[0];
+                    if (intersectedBlock !== firstHit.object) {
+                        intersectedBlock = firstHit.object;
+                        highlightMesh.visible = true;
+                        highlightMesh.position.copy(intersectedBlock.position);
+                    }
+                } else {
+                    intersectedBlock = null;
+                    highlightMesh.visible = false;
+                }
+            }
+
+            prevTime = time;
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Запуск
+        window.onload = function() {
+            init();
+            animate();
+        };
+    </script>
+</body>
+</html>
